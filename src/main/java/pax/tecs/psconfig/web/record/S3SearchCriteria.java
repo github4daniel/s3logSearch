@@ -21,9 +21,6 @@ import org.apache.commons.lang3.StringEscapeUtils;
 
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 
-import pax.tecs.psconfig.web.record.Domain;
-import pax.tecs.psconfig.web.record.Period;
-
 public class S3SearchCriteria {
 
 	@NotNull(message = "Must select a domain type.")
@@ -47,6 +44,8 @@ public class S3SearchCriteria {
 	private String searchText3;
 
 	private String download;
+	
+	private long timeExt;
 
 	private DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
 
@@ -129,13 +128,11 @@ public class S3SearchCriteria {
 	}
 
 	public Date getStartDate() throws ParseException {
-		return Pattern.matches("yyyy-MM-dd'T'HH:mm:ss", startDateTime) ? dateFormat.parse(startDateTime)
-				: new SimpleDateFormat("yyyy-MM-dd'T'HH:mm").parse(startDateTime);
+		return parseDate(startDateTime);
 	}
 
 	public Date getEndDate() throws ParseException {
-		return Pattern.matches("yyyy-MM-dd'T'HH:mm:ss", endDateTime) ? dateFormat.parse(endDateTime)
-				: new SimpleDateFormat("yyyy-MM-dd'T'HH:mm").parse(endDateTime);
+		return parseDate(endDateTime);
 	}
 
 	public String getDownload() {
@@ -146,6 +143,10 @@ public class S3SearchCriteria {
 		this.download = download;
 	}
 	
+	public void setTimeExt(long timeExt) {
+		this.timeExt = timeExt;
+	}
+
 	public S3SearchCriteria() {
 		Date d = new Date();
 		this.startDateTime = dateFormat.format(d);
@@ -177,6 +178,14 @@ public class S3SearchCriteria {
 		return saveAsFileName + ".txt";
 
 	}
+	
+	private Date parseDate(String dateTime) throws ParseException {
+		try {
+			return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss").parse(dateTime);
+		} catch (Exception e) {
+			return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm").parse(dateTime);
+		}
+	}
 
 	protected String getEntryNames() {
 		String names = entryType.stream().map(e -> e.name() + "_").collect(Collectors.joining());
@@ -192,7 +201,9 @@ public class S3SearchCriteria {
 			if (period != null) {
 				return lastModifiedDate.compareTo(period.getDate(LocalDateTime.now()))>= 0;
 			} else {
-				if (lastModifiedDate.compareTo(getStartDate()) < 0 || lastModifiedDate.compareTo(getEndDate()) > 0) {
+				LocalDateTime lEnd = getEndDate().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime().plusMinutes(timeExt);
+				Date end = Date.from(lEnd.atZone(ZoneId.systemDefault()).toInstant());
+				if (lastModifiedDate.compareTo(getStartDate()) < 0 || lastModifiedDate.compareTo(end) > 0) {
 					return false;
 				}
 			}
@@ -267,5 +278,4 @@ public class S3SearchCriteria {
 		}
 		return dates.stream().map(d-> dateTimeFormat.format(d)).toList();
 	}
-
 }

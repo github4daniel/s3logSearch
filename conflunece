@@ -1,52 +1,41 @@
 Summary:
+This document outlines a batch job solution for extracting S3 logs error message and send email to development team.  
 
-This document outlines a batch job solution for extracting S3 logs error message and send email to development team.  
-
-With our application's migration to AWS cloud, which runs on AWS docker container and Kubernetes. The application logs are stored into S3 bucket as GZ file via FluentD.  In this new AWS-based solution, the process shifts to S3 log's retrieval and email error log to the concern recipients, and post error the log information to a dashboard.
+With our application's migration to AWS cloud, which runs on AWS docker container and Kubernetes. The application logs are stored into S3 bucket as GZ file via FluentD.  In this new AWS-based solution, it extracts S3 log's and email error logs to the concern recipients, and meanwhile post error log information to a dashboard.
 
 Business Requirements:
+Mark Stauffer has done very good job in outlining the requirements and initial design for this project, please see link Batch Reporting with S3 
 
-In the on-premises system, the applications are hosted on Weblogic. There are daily CRON job searching server logs, identifying error types and email error log to the development team.
+On the on-premises system, the applications are hosted on Weblogic. There are daily CRON jobs searching Weblogic server logs, identifying error types and emailing error log to the development team.  Please view this link CRON Jobs. The Perl runtime is currently running cron jobs, the email message like below.
 
-As the application migrates to cloud, and log files are store in a compressed format (gz file) within s3 buckets, The project objectives are to extract and process these log files and persisting captured information into a database.  Additionally, a scheduler will later retrieve saved data and process this data, forwarding it to the designated email recipients, and posting it on dashboard for further analysis.
 
+As For Now the legacy Weblogic applications decommissioned and new applications migrate to cloud and log files are store in a compressed format (gz) within s3 bucket. The objective of this project is to replicate the same function as legacy system. We are going to use existing S3 log search for extracting data, please see this link PIP CACE S3 Log Searching. The S3 log search tool is for Ad hoc text search, It can search any text in log files. While error extraction in new application is to search and extract predefined the error type.
 Architecture Overview:
+The defining characteristics of the batch job is its on-demand nature, eliminating the necessity for continuous 24/7 operation like traditional service or server. To best align with this requirement, the optimal solution is to leverage AWS Serverless architect for the application. The benefits of a serverless architecture includes an event-driven approach the facilitates application decoupling, cost effectiveness, minimal maintenance overhead, horizontal scaling capabilities. etc.  The following architecture diagram is what I propose. 
 
-The defining characteristics of the batch job is its on-demand nature, eliminating the necessity for continuous 24/7 operation like traditional service or server. To best align with this requirement, the optimal solution is to leverage AWS serverless architect for the application. The benefits of a serverless architecture includes an event-driven approach the facilitates application decoupling, cost effectiveness, minimal maintenance overhead, horizontal scaling capabilities. etc.  The following architecture diagram is what I propose. 
-
- Upon FluentD placing a log file into the S3 bucket, the S3 system generate a ObjectPutEvent. The event serves as a trigger a Lambda function. The Lambda function is responsible for extracting pertinent log information from file and subsequently saving into the database.  This Lambda function is similar to S3 log search we implemented.
- AWS EventBridge acts as a time scheduler, trigger a Lambda function. This Lambda function collects event context, such as the type of error, time lines for log entries.  Subsequently, it publishes this information to AWS Simple Notification Services (SNS). The receiving end of SNS involves two Lambda
+ Upon FluentD placing a log file into the S3 bucket, the S3 system generate a ObjectPutEvent. The event serves as a trigger for the Lambda function. The Lambda function (S3 Search Engine in diagram) is responsible for extracting pertinent log information from file and subsequently saving into the database.  This Lambda function is similar to S3 log search we implemented.
+ AWS EventBridge acts as a time scheduler, trigger a Lambda function. This Lambda function collects event context, such as the type of error, time lines for log entries.  Subsequently, it publishes this information to AWS Simple Notification Services (SNS). The receiving end of SNS involves two Lambda
 The first Lambda is dedicated to aggregating and processing error data for email content generation, and utilize AWS Simple Email Service (SES) to send email to recipients.
 The second Lambda is responsible for aggregating and processing error data as well, but it focus on generating data for the Dashboard.
 
 
 
 
-at
-
+Implementation Resource Required:
+Utilize the Terraform tool for AWS component provision. (In local environment, I can use CLI to execute Terraform script. For CI/CD, does Jenkin pipeline already setup Terraform?) 
+Full read and write privileges to AWS Dev account environment (I need information like which AWS VPC, AWS security group, NAT to use, whom should I consult to?)
 Other Technologies
 AWS Glue
-
-AWS Glue is fully managed ETL service, designed to simplified data preparation and transformation. Key features include a centralized Data Catalog, crawlers for discovering metadata from diverse data sources, and visual ETL tools. It works on structured data, such as data in RDS, Excel, CSV files or semi-structured data, such as JSON, XML or YAML file.  Glue is mainly for ETL function. Crawler does not work on GZ file. 
+AWS Glue is fully managed ETL service, designed to simplified data preparation and transformation. Key features include a centralized Data Catalog, crawlers for discovering metadata from diverse data sources, and visual ETL tools. It works on structured data, such as data in RDS, Excel, CSV files or semi-structured data, such as JSON, XML or YAML file.  Glue is mainly for ETL function. Crawler does not work on GZ file. 
 
 AWS Athena
-
 AWS Athena is an interactive query service for analyze data in S3 and other federated data sources using SQL.
 
 AWS Step Function
-
-AWS step function is a fully managed AWS web service that enables you to coordinate and orchestrate multiple service into serverless workflow. 
+AWS step function is a fully managed AWS web service that enables you to coordinate and orchestrate multiple service into Serverless workflow. 
 
 AWS Batch
-
-AWS batch is a fully managed AWS web service that allow you to run batching computing workloads on the AWS cloud.  You can provision EC2 and docker or serverless Fargate (without provision EC2 instance). The AWS batch is suitable for long running process. Unlike AWS lambda, the timeout is 15 minutes.
+AWS batch is a fully managed AWS web service that allow you to run batching computing workloads on the AWS cloud.  You can provision EC2 and docker or Serverless Fargate (without provision EC2 instance). The AWS batch is suitable for long running process. Unlike AWS lambda, the timeout is 15 minutes.
 
 Conclusion
-
 AWS Glue and Athena are best fit for ETL. The cost is expensive, based on my experimental running.
-
-
-
-Question:
-
-For Dashboard, can we use the existing OpenSearch dashboard,  instead of creating a web application. I am not sure if it is doable. I propose generate the dashboard data compatible with OpenSearch Data, using Open Search API to persist the data into its datastore.

@@ -7,7 +7,7 @@ import com.amazonaws.services.s3.model.S3ObjectSummary;
 public class S3Record {
 
 	private String line;
-	private S3ObjectSummary s3ObjectSummary;
+	private String fileName;
 	private Date logDate;
 	private String domainDisplay;
 
@@ -16,12 +16,12 @@ public class S3Record {
 		
 	}
 	
-	public S3ObjectSummary getS3ObjectSummary() {
-		return s3ObjectSummary;
+	public String getFileName() {
+		return fileName;
 	}
 
-	public void setS3ObjectSummary(S3ObjectSummary s3ObjectSummary) {
-		this.s3ObjectSummary = s3ObjectSummary;
+	public void setFileName(String fileName) {
+		this.fileName = fileName;
 	}
 
 	public String getLine() {

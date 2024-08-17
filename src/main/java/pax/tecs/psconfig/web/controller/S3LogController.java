@@ -1,18 +1,26 @@
 package pax.tecs.psconfig.web.controller;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.ParseException;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 import java.util.concurrent.Future;
 import java.util.function.Function;
@@ -21,6 +29,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import javax.validation.Valid;
 
 import org.apache.commons.lang3.StringEscapeUtils;
+import org.apache.tomcat.util.http.fileupload.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -49,6 +58,9 @@ public class S3LogController {
 
 	@Value("${S3_BUCKET_NAME}")
 	private String bucketName;
+	
+	@Value("${dir_path:/data}")
+	private String dataDir;
 
 	private static String bucketPrefix = "logs";
 
@@ -102,7 +114,7 @@ public class S3LogController {
 						records.stream().forEach(e -> {
 							pw.write(e.getDomainDisplay());
 							pw.write("\t");
-							pw.write(e.getS3ObjectSummary().getKey());
+							pw.write(e.getFileName());
 							pw.write("\t");
 							pw.write(e.getLine());
 							pw.write("\n");
@@ -134,6 +146,16 @@ public class S3LogController {
 		List<String> searchDays = criteria.extractSearchDays();
 
 		List<S3Record> allRecords = new ArrayList<>();
+		
+		String tmpDir = dataDir + File.separator + UUID.randomUUID().toString();
+		Path tmpPath = Paths.get(tmpDir);
+		
+		try {
+			
+			Files.createDirectories(tmpPath);
+		}catch (IOException ie) {
+			logger.error("Error in creating directory {}", tmpPath);
+		}
 
 		criteria.getEntryType().stream().forEach(e -> {
 
@@ -158,12 +180,21 @@ public class S3LogController {
 
 				logger.info("Total number of candidate files: {}  for the domain {} ", candidateList.size(), e.getDisplayName());
 
+				Stream<Path> files = Stream.empty();
+				downloadS3Object(candidateList, tmpPath);
+				
+				try {
+					files = Files.list(tmpPath);
+				}catch(IOException ie){
+					logger.error("Error exception in list files retrieved from S3 bucket", ie);
+				}
+				
 				List<S3Record> records = new ArrayList<>();
 				ExecutorService eService = Executors.newFixedThreadPool(6);
 				List<Future<List<S3Record>>> futures = new ArrayList<>();
 
-				candidateList.stream().forEach(s -> {
-					Callable<List<S3Record>> callable = new S3ThreadWorker(s, criteria, e);
+				files.forEach(p -> {
+					Callable<List<S3Record>> callable = new S3ThreadWorker(p, criteria, e);
 					Future<List<S3Record>> future = eService.submit(callable);
 					futures.add(future);
 				});
@@ -187,6 +218,7 @@ public class S3LogController {
 			});
 		});
 
+		FileUtils.deleteDirectory(tmpPath.toFile());
 		LocalTime after = LocalTime.now();
 
 		logger.info("Total number of all records found {} ", allRecords.size());
@@ -194,15 +226,25 @@ public class S3LogController {
 
 		return allRecords;
 	}
+	
+	private void downloadS3Object(List<S3ObjectSummary> candidateList, Path tmpDirectory) {
+		candidateList.stream().forEach(e->{
+			String key = e.getKey();
+			String parts = key.split("/");
+			String fileName = parts[parts.length-1];
+			Path filePath = tmpDirectory.resolve(fileName);
+			s3Client.getObject(new GetObjectRequest(bucketName, key), filePath.toFile());
+		});	
+	}
 
 	private class S3ThreadWorker implements Callable<List<S3Record>> {
 
-		private S3ObjectSummary s3ObjectSummary;
+		private Path path;
 		private S3SearchCriteria criteria;
 		private Domain current;
 
-		public S3ThreadWorker(S3ObjectSummary s3ObjectSummary, S3SearchCriteria criteria, Domain current) {
-			this.s3ObjectSummary = s3ObjectSummary;
+		public S3ThreadWorker(Path path, S3SearchCriteria criteria, Domain current) {
+			this.path = path;
 			this.criteria = criteria;
 			this.current = current;
 		}
@@ -210,18 +252,15 @@ public class S3LogController {
 		@Override
 		public List<S3Record> call() throws Exception {
 			List<S3Record> rs = new ArrayList<>();
-			if (s3ObjectSummary.getKey().endsWith(".gz")) {
-				GetObjectRequest objectRequest = new GetObjectRequest(s3ObjectSummary.getBucketName(),
-						s3ObjectSummary.getKey());
-
-				S3Object s3Object = s3Client.getObject(objectRequest);
-				GZIPInputStream in = new GZIPInputStream(s3Object.getObjectContent());
+			
+			try(InputStream fileInputStream = Files.newInputStream(path); 
+					GZIPInputStream in = new GZIPInputStream(fileInputStream)){
 				String line = null;
 				try (BufferedReader reader = new BufferedReader(new InputStreamReader(in))) {
 					while ((line = reader.readLine()) != null) {
 						S3Record s3Record = criteria.match(line);
 						if (s3Record != null) {
-							s3Record.setS3ObjectSummary(s3ObjectSummary);
+							s3Record.setFileName(path.getFileName().toString());
 							s3Record.setDomainDisplay(current.getDisplayName());
 							rs.add(s3Record);
 						}
@@ -234,6 +273,7 @@ public class S3LogController {
 				}
 			}
 			return rs;
+			}	
 		}
 
 	}
